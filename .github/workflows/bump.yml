@@ -1,0 +1,46 @@
+name: Bump helium-services submodule to latest version
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with: { submodules: true, fetch-depth: 0 }
+
+      - name: Bump submodule and make PR
+        env:
+          GH_TOKEN: ${{ secrets.GHPAT }}
+        run: |
+          set -euxo pipefail
+
+          pushd helium-services
+            git fetch origin main
+            git checkout origin/main
+          popd
+
+          if git diff --quiet helium-services; then
+            echo "helium-services is already up to date"
+            exit 0
+          fi
+
+          git switch update || git switch -c update
+
+          ubo_version=$(sed -n "s/.*VERSION_HELIUM = '\(.*\)'.*/\1/p" \
+            helium-services/svc/ubo/lib/assets-info.ts)
+
+          TITLE="update: helium-services (uBO assets $ubo_version)"
+
+          git config user.name "helium-bot"
+          git config user.email "helium-bot@imput.net"
+          git add helium-services
+
+          git commit -m "$TITLE"
+          git push origin update
+          gh pr create --title "$TITLE" --body "" || :

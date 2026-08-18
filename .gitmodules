@@ -1,0 +1,3 @@
+[submodule "helium-services"]
+	path = helium-services
+	url = https://github.com/imputnet/helium-services

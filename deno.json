@@ -1,0 +1,15 @@
+{
+    "license": "GPL-3.0",
+    "lock": false,
+    "tasks": {
+        "generate": "UBO_PROXY_BASE_URL=https://unused.invalid/ deno run --allow-env='UBO_*' --allow-net --allow-write=out generate.ts",
+        "check": "deno check generate.ts && deno fmt --check generate.ts"
+    },
+    "fmt": {
+        "indentWidth": 4,
+        "singleQuote": true,
+        "lineWidth": 80,
+        "trailingCommas": "onlyMultiLine",
+        "operatorPosition": "nextLine"
+    }
+}
