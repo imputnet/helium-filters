@@ -1,74 +1,74 @@
 name: Build release
 
 permissions:
-  contents: write
+    contents: write
 
 on:
-  workflow_dispatch:
+    workflow_dispatch:
 
 jobs:
-  make-snapshot:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Compute release tag
-        id: ts
-        run: echo "tag=$(date -u +%Y%m%d%H%M)" | tee -a "$GITHUB_OUTPUT"
+    make-snapshot:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Compute release tag
+              id: ts
+              run: echo "tag=$(date -u +%Y%m%d%H%M)" | tee -a "$GITHUB_OUTPUT"
 
-      - name: Check out sources
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+            - name: Check out sources
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  submodules: recursive
 
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+            - name: Set up Deno
+              uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+              with:
+                  deno-version: v2.x
 
-      - name: Generate filter snapshot
-        run: deno task generate
+            - name: Generate snapshot
+              run: deno task generate
 
-      - name: Make tarball
-        env:
-          TAG: ${{ steps.ts.outputs.tag }}
-        run: |
-            cd out
-            find . -print0 \
-            | sort -z \
-            | GZIP="-9n" tar -zcf "/tmp/helium-filters-$TAG.tar.gz" \
-                --format=posix \
-                --numeric-owner \
-                --owner=0 \
-                --group=0 \
-                --pax-option='delete=atime,delete=ctime' \
-                --mode='go+u,go-w' \
-                --preserve-permissions \
-                --mtime='1970-01-01' \
-                --no-recursion \
-                --null \
-                --files-from -
+            - name: Make tarball
+              env:
+                  TAG: ${{ steps.ts.outputs.tag }}
+              run: |
+                  cd out
+                  find . -print0 \
+                  | sort -z \
+                  | GZIP="-9n" tar -zcf "/tmp/helium-filters-$TAG.tar.gz" \
+                      --format=posix \
+                      --numeric-owner \
+                      --owner=0 \
+                      --group=0 \
+                      --pax-option='delete=atime,delete=ctime' \
+                      --mode='go+u,go-w' \
+                      --preserve-permissions \
+                      --mtime='1970-01-01' \
+                      --no-recursion \
+                      --null \
+                      --files-from -
 
-      - name: Make release body
-        run: |
-          {
-            echo '```'
-            (cd /tmp && sha256sum helium-filters-*.tar.gz)
-            echo '```'
-            echo ''
-            echo '<details><summary>SHA256 of generated assets</summary>'
-            echo ''
-            echo '```'
-            (cd out && find . -type f | sed 's|^\./||' | sort | xargs sha256sum)
-            echo '```'
-            echo '</details>'
-          } > /tmp/release.md
+            - name: Make release body
+              run: |
+                  {
+                    echo '```'
+                    (cd /tmp && sha256sum helium-filters-*.tar.gz)
+                    echo '```'
+                    echo ''
+                    echo '<details><summary>SHA256 of generated assets</summary>'
+                    echo ''
+                    echo '```'
+                    (cd out && find . -type f | sed 's|^\./||' | sort | xargs sha256sum)
+                    echo '```'
+                    echo '</details>'
+                  } > /tmp/release.md
 
-      - name: Release
-        uses: imputnet/action-gh-release@v2.5
-        with:
-          body_path: /tmp/release.md
-          draft: false
-          prerelease: true
-          files: /tmp/helium-filters-${{ steps.ts.outputs.tag }}.tar.gz
-          name: ${{ steps.ts.outputs.tag }}
-          tag_name: ${{ steps.ts.outputs.tag }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+            - name: Release
+              uses: imputnet/action-gh-release@f0aaee5ca0734029d3612cf234fbc25f261b5036 # v2.5
+              with:
+                  body_path: /tmp/release.md
+                  draft: false
+                  prerelease: true
+                  files: /tmp/helium-filters-${{ steps.ts.outputs.tag }}.tar.gz
+                  name: ${{ steps.ts.outputs.tag }}
+                  tag_name: ${{ steps.ts.outputs.tag }}
+                  token: ${{ secrets.GITHUB_TOKEN }}

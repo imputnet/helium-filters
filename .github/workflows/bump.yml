@@ -1,46 +1,48 @@
-name: Bump helium-services submodule to latest version
+name: Bump adblock sources to latest version
 
 on: workflow_dispatch
 
 permissions:
-  contents: write
-  pull-requests: write
+    contents: write
+    pull-requests: write
 
 jobs:
-  bump:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with: { submodules: true, fetch-depth: 0 }
+    bump:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repo
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with: { submodules: true, fetch-depth: 0 }
 
-      - name: Bump submodule and make PR
-        env:
-          GH_TOKEN: ${{ secrets.GHPAT }}
-        run: |
-          set -euxo pipefail
+            - name: Bump sources and make PR
+              env:
+                  GH_TOKEN: ${{ secrets.GHPAT }}
+              run: |
+                  set -euxo pipefail
 
-          pushd helium-services
-            git fetch origin main
-            git checkout origin/main
-          popd
+                  git -C helium-services fetch origin main
+                  git -C helium-services checkout origin/main
 
-          if git diff --quiet helium-services; then
-            echo "helium-services is already up to date"
-            exit 0
-          fi
+                  ubo_version=$(sed -n "s/.*VERSION_HELIUM = '\(.*\)'.*/\1/p" \
+                    helium-services/svc/ubo/lib/assets-info.ts)
+                  test -n "$ubo_version"
 
-          git switch update || git switch -c update
+                  git -C ublock fetch origin tag "$ubo_version"
+                  git -C ublock checkout --detach "$ubo_version"
 
-          ubo_version=$(sed -n "s/.*VERSION_HELIUM = '\(.*\)'.*/\1/p" \
-            helium-services/svc/ubo/lib/assets-info.ts)
+                  if git diff --quiet -- helium-services ublock; then
+                    echo "adblock sources are already up to date"
+                    exit 0
+                  fi
 
-          TITLE="update: helium-services (uBO assets $ubo_version)"
+                  git switch update || git switch -c update
 
-          git config user.name "helium-bot"
-          git config user.email "helium-bot@imput.net"
-          git add helium-services
+                  TITLE="update: uBO assets $ubo_version"
 
-          git commit -m "$TITLE"
-          git push origin update
-          gh pr create --title "$TITLE" --body "" || :
+                  git config user.name "helium-bot"
+                  git config user.email "helium-bot@imput.net"
+                  git add helium-services ublock
+
+                  git commit -m "$TITLE"
+                  git push origin update
+                  gh pr create --title "$TITLE" --body "" || :

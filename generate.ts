@@ -1,10 +1,6 @@
-// Generates a static snapshot of the uBlock Origin asset catalog and every
-// filter list in it, for bundling into Helium builds as offline seed data.
-// The catalog source and checksum are pinned by the helium-services
-// submodule (svc/ubo/lib/assets-info.ts).
-
 import * as AssetsInfo from './helium-services/svc/ubo/lib/assets-info.ts';
 import * as Util from './helium-services/svc/ubo/lib/util.ts';
+import { generateResourcesJson } from './generate-resources.ts';
 
 type Asset = {
     content: 'internal' | 'filters';
@@ -16,66 +12,32 @@ type Asset = {
     [key: string]: unknown;
 };
 
-type AssetFile = Record<string, Asset>;
-
 const OUT_DIR = 'out';
-const LOCAL_PREFIX = 'assets/filters/';
 const FETCH_CONCURRENCY = 8;
-
-// Helium's adjustments to the upstream catalog. Only bundled catalogs are
-// affected; adjustments that must reach the live assets.json proxy belong
-// in the imputnet/uBlock fork instead.
-const HELIUM_ADJUSTMENTS: Record<string, Partial<Asset>> = {
-    'adguard-mobile-app-banners': { ua: 'mobile' },
-};
-
-// Default-enabled entries get their remote URLs removed so a bundled
-// catalog causes no outgoing connections before the user consents to
-// Helium services (like helium-chromium's clear-ublock-assets.js).
-// Mobile-targeted lists are on by default on mobile platforms.
-const isDefaultEnabled = (asset: Asset) => !asset.off || asset.ua === 'mobile';
-
-const loadManifest = async () => {
-    const assetList = await fetch(AssetsInfo.assetsUrl)
-        .then((a) => a.text());
-    const checksum = await Util.digest(assetList);
-    if (checksum !== AssetsInfo.fileChecksum) {
-        throw `assets.json checksum does not match: ${checksum}`;
-    }
-
-    return {
-        manifest: JSON.parse(assetList) as AssetFile,
-        checksum,
-    };
-};
-
-const filterFilename = (id: string) => {
-    if (!/^[A-Za-z0-9._-]+$/.test(id) || id.startsWith('.')) {
-        throw `unsafe asset id: ${id}`;
-    }
-
-    return `${id}.txt`;
-};
 
 const fetchInPool = async (tasks: readonly (() => Promise<void>)[]) => {
     let next = 0;
 
-    const worker = async () => {
-        while (next < tasks.length) {
-            await tasks[next++]();
-        }
-    };
-
     await Promise.all(
         Array.from(
             { length: Math.min(FETCH_CONCURRENCY, tasks.length) },
-            worker,
+            async () => {
+                while (next < tasks.length) {
+                    await tasks[next++]();
+                }
+            },
         ),
     );
 };
 
 const main = async () => {
-    const { manifest, checksum } = await loadManifest();
+    const assetList = await fetch(AssetsInfo.assetsUrl)
+        .then((response) => response.text());
+    const checksum = await Util.digest(assetList);
+    if (checksum !== AssetsInfo.fileChecksum) {
+        throw `assets.json checksum does not match: ${checksum}`;
+    }
+    const manifest = JSON.parse(assetList) as Record<string, Asset>;
 
     const fileDigests: Record<string, string> = {};
     const writeOutput = async (path: string, contents: string) => {
@@ -87,12 +49,13 @@ const main = async () => {
     await Deno.remove(OUT_DIR, { recursive: true }).catch(() => {});
     await Deno.mkdir(`${OUT_DIR}/assets/filters`, { recursive: true });
 
-    for (const [id, adjustment] of Object.entries(HELIUM_ADJUSTMENTS)) {
-        if (!(id in manifest)) {
-            throw `adjustment for unknown asset: ${id}`;
-        }
-        Object.assign(manifest[id], adjustment);
+    // This adjustment applies only to the bundled catalog. Changes needed by
+    // the live assets.json proxy belong in the imputnet/uBlock fork instead.
+    const mobileBanners = manifest['adguard-mobile-app-banners'];
+    if (mobileBanners === undefined) {
+        throw 'missing adguard-mobile-app-banners asset';
     }
+    mobileBanners.ua = 'mobile';
 
     const filterEntries = Object.entries(manifest).filter(
         ([, asset]) => asset.content === 'filters',
@@ -101,9 +64,13 @@ const main = async () => {
     const failures: string[] = [];
 
     const tasks = filterEntries.map(([id, asset]) => async () => {
-        const localPath = LOCAL_PREFIX + filterFilename(id);
-        const allUrls = [asset.contentURL, asset.cdnURLs || []].flat();
-        const sourceURLs = allUrls.filter(Util.isValidUrl) as string[];
+        if (!/^[A-Za-z0-9._-]+$/.test(id) || id.startsWith('.')) {
+            throw `unsafe asset id: ${id}`;
+        }
+        const localPath = `assets/filters/${id}.txt`;
+        const sourceURLs = [asset.contentURL, asset.cdnURLs ?? []]
+            .flat()
+            .filter(Util.isValidUrl) as string[];
 
         if (!sourceURLs.length) {
             throw `no source for ${id}`;
@@ -132,8 +99,11 @@ const main = async () => {
 
     await fetchInPool(tasks);
 
+    // Default-enabled entries get their remote URLs removed so a bundled
+    // catalog causes no outgoing connections before the user consents to
+    // Helium services. Mobile-targeted lists are enabled on mobile platforms.
     for (const asset of Object.values(manifest)) {
-        if (!isDefaultEnabled(asset)) {
+        if (asset.off && asset.ua !== 'mobile') {
             continue;
         }
 
@@ -153,6 +123,10 @@ const main = async () => {
         'assets/assets.json',
         JSON.stringify(manifest, null, '\t') + '\n',
     );
+    await writeOutput(
+        'resources.json',
+        await generateResourcesJson('ublock/src'),
+    );
 
     const summary = {
         source: {
@@ -169,7 +143,8 @@ const main = async () => {
 
     console.log(
         `wrote ${filterEntries.length - failures.length} of `
-            + `${filterEntries.length} lists and assets.json to ${OUT_DIR}/`,
+            + `${filterEntries.length} lists, assets.json, and resources.json `
+            + `to ${OUT_DIR}/`,
     );
     if (failures.length) {
         console.warn(`WARN: missing lists: ${failures.join(', ')}`);
